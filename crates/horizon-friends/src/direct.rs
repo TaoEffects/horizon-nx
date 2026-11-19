@@ -2,6 +2,7 @@
 //! offers, and the race that dials all of the other's at once from the port
 //! it also listens on (so two NATs that map a port the same way for every
 //! destination let the two SYNs cross: TCP simultaneous open).
+#[cfg(not(target_os = "horizon"))]
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 use std::{
     io::{self, Read, Write},
@@ -21,6 +22,7 @@ const MAGIC: &[u8; 4] = b"HZF1";
 /// A guest dialling an endpoint from an invite code (no relay involved).
 pub const CODE_MAGIC: &[u8; 4] = b"HZF2";
 
+#[cfg(not(target_os = "horizon"))]
 fn socket_for(addr: &SocketAddr) -> io::Result<Socket> {
     let s = Socket::new(
         Domain::for_address(*addr),
@@ -47,6 +49,15 @@ fn unspecified(v6: bool, port: u16) -> SocketAddr {
 /// The direct socket's listeners: IPv4 on `port` (0 picks one), and IPv6 on
 /// the same port when the system has it.
 pub fn listen(port: u16) -> io::Result<(Vec<TcpListener>, u16)> {
+    #[cfg(target_os = "horizon")]
+    {
+        let v4 = TcpListener::bind(unspecified(false, port))?;
+        let port = v4.local_addr()?.port();
+        v4.set_nonblocking(true)?;
+        return Ok((vec![v4], port));
+    }
+    #[cfg(not(target_os = "horizon"))]
+    {
     let bind = |addr: SocketAddr| -> io::Result<TcpListener> {
         let s = socket_for(&addr)?;
         s.bind(&SockAddr::from(addr))?;
@@ -62,11 +73,19 @@ pub fn listen(port: u16) -> io::Result<(Vec<TcpListener>, u16)> {
         out.push(v6);
     }
     Ok((out, port))
+    }
 }
 
 /// Connect to `to` from local `port` (shared with the listener), or from any
 /// port when that one can't be used (the same pair already connected).
 pub fn connect_from(port: Option<u16>, to: SocketAddr, timeout: Duration) -> io::Result<TcpStream> {
+    #[cfg(target_os = "horizon")]
+    {
+        let _ = port;
+        return TcpStream::connect_timeout(&to, timeout);
+    }
+    #[cfg(not(target_os = "horizon"))]
+    {
     if let Some(port) = port {
         let s = socket_for(&to)?;
         if s.bind(&SockAddr::from(unspecified(to.is_ipv6(), port)))
@@ -85,6 +104,7 @@ pub fn connect_from(port: Option<u16>, to: SocketAddr, timeout: Duration) -> io:
         }
     }
     TcpStream::connect_timeout(&to, timeout)
+    }
 }
 
 /// This end's candidates for a relayed session: its interface addresses

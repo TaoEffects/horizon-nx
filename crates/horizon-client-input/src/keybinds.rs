@@ -288,6 +288,13 @@ pub use horizon_client_core::key_display::display_name;
 /// that key from now on (`key_display::learn_layout`), so an AZERTY player's
 /// Q key shows A.
 pub fn learn_layout(event: &winit::event::KeyEvent) {
+    #[cfg(target_os = "horizon")]
+    {
+        let _ = event;
+        return;
+    }
+    #[cfg(not(target_os = "horizon"))]
+    {
     use winit::keyboard::{Key, PhysicalKey};
     use winit::platform::modifier_supplement::KeyEventExtModifierSupplement;
     let PhysicalKey::Code(code) = event.physical_key else {
@@ -301,6 +308,7 @@ pub fn learn_layout(event: &winit::event::KeyEvent) {
         Key::Character(text) => learn(name, &text),
         Key::Dead(Some(c)) => learn(name, c.encode_utf8(&mut [0; 4])),
         _ => {}
+    }
     }
 }
 

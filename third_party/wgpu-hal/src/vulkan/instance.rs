@@ -980,12 +980,14 @@ impl crate::Instance for super::Instance {
             (Rwh::Drm(handle), Rdh::Drm(display)) => {
                 self.create_surface_from_drm_plane(display.fd, handle.plane)
             }
+            #[cfg(target_os = "horizon")]
+            (Rwh::AndroidNdk(handle), _) => {
+                self.create_surface_from_vi(handle.a_native_window.as_ptr())
+            }
+            #[cfg(not(target_os = "horizon"))]
             (Rwh::AndroidNdk(handle), _) => {
                 self.create_surface_android(handle.a_native_window.as_ptr())
             }
-            // horizon-port
-            #[cfg(target_os = "horizon")]
-            (Rwh::Horizon(handle), _) => self.create_surface_from_vi(handle.n_window.as_ptr()),
             (Rwh::Win32(handle), _) => {
                 let hinstance = handle.hinstance.ok_or_else(|| {
                     crate::InstanceError::new(String::from(

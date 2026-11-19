@@ -13,6 +13,10 @@ default = []
 # Without it, compat provides a null vkGetInstanceProcAddr so wgpu's Vulkan
 # backend links and reports no driver.
 vulkan = []
+# Switch 2 uses libounce and OunceVK instead of the Switch 1 libnx +
+# mesa-switch archive. Keep this separate so the existing Switch 1 release
+# remains reproducible.
+switch2 = ["vulkan"]
 # Rust's blocks of 256 KiB and up go in NVK's top-down heap region (allocator.rs).
 # Sets the `#[global_allocator]`, so a game with its own can't use it.
 top_down_alloc = ["vulkan"]

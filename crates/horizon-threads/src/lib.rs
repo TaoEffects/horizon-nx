@@ -201,10 +201,14 @@ pub fn catch_stop_signals() {}
 /// 16% of a chunk's generation time), mimalloc keeps a heap per thread.
 /// On the Switch it takes its arenas from newlib's heap (the port's
 /// libmimalloc-sys patch); a build with `nx-allocator` uses horizon-nx's instead.
+#[cfg(feature = "mimalloc")]
 pub use mimalloc::MiMalloc as Allocator;
+#[cfg(not(feature = "mimalloc"))]
+pub use std::alloc::System as Allocator;
 
 /// `mi_option_purge_delay` in mimalloc.h (index 15 in v2 and v3); the bindings
 /// don't name it.
+#[cfg(feature = "mimalloc")]
 const PURGE_DELAY: libmimalloc_sys::mi_option_t = 15;
 
 /// Set the allocator up, first thing in `main`: free pages go back to the OS
@@ -213,6 +217,7 @@ const PURGE_DELAY: libmimalloc_sys::mi_option_t = 15;
 /// and generation keeps most of its speed-up. On the Switch nothing can go
 /// back (the heap is fixed and always backed), so it never purges: a purge
 /// would only walk free pages for nothing.
+#[cfg(feature = "mimalloc")]
 pub fn configure_allocator() {
     let delay = if cfg!(target_os = "horizon") { -1 } else { 0 };
     // SAFETY: sets one integer option, which mimalloc reads at each purge.
@@ -221,11 +226,15 @@ pub fn configure_allocator() {
     }
 }
 
+#[cfg(not(feature = "mimalloc"))]
+pub fn configure_allocator() {}
+
 /// Give back to the OS the memory the allocator holds free, after something
 /// large was dropped: mimalloc's free pages, then the system heap's, which
 /// native libraries still use: glibc keeps freed pages in the arena of the
 /// thread that allocated them, and macOS in its zones until memory runs short.
 pub fn release_free_memory() {
+    #[cfg(feature = "mimalloc")]
     // SAFETY: frees only pages no allocation uses (this thread's heap, shared arenas).
     unsafe {
         libmimalloc_sys::mi_collect(true);

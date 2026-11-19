@@ -239,6 +239,12 @@ impl Game<'_> {
                 }
                 Ok(())
             }
+            gamepad::TOGGLE_DEBUG => {
+                if down && self.screen == Screen::Playing {
+                    self.key_pressed(KeyCode::F3)?;
+                }
+                Ok(())
+            }
             "key.sneak"
                 if self.settings.controller.toggle_sneak && !self.settings.toggle_crouch =>
             {

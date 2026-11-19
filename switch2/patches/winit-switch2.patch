@@ -1,0 +1,351 @@
+diff --git a/switch/patches/winit-0.30.13/src/platform_impl/nx/event_loop.rs b/switch/patches/winit-0.30.13/src/platform_impl/nx/event_loop.rs
+index 1c02678..1e04893 100644
+--- a/switch/patches/winit-0.30.13/src/platform_impl/nx/event_loop.rs
++++ b/switch/patches/winit-0.30.13/src/platform_impl/nx/event_loop.rs
+@@ -6,13 +6,13 @@ use std::sync::{mpsc, Arc};
+ use std::time::{Duration, Instant};
+ 
+ use crate::error::EventLoopError;
+-use crate::event::{self, ElementState, MouseButton, StartCause, TouchPhase};
++use crate::event::{self, DeviceEvent, ElementState, MouseButton, MouseScrollDelta, StartCause, TouchPhase};
+ use crate::event_loop::{self, ControlFlow, DeviceEvents};
+ use crate::window::{
+     CustomCursor as RootCustomCursor, CustomCursorSource, Theme, WindowId as RootWindowId,
+ };
+ 
+-use super::{ffi, DeviceId, MonitorHandle, PlatformSpecificEventLoopAttributes, WindowId};
++use super::{ffi, DeviceId, MonitorHandle, PlatformSpecificEventLoopAttributes, WindowId, HEIGHT, WIDTH};
+ 
+ /// State the window and the loop share (the window may live on another thread).
+ #[derive(Default)]
+@@ -29,6 +29,7 @@ pub struct EventLoop<T> {
+     window_target: event_loop::ActiveEventLoop,
+     user_events_sender: mpsc::Sender<T>,
+     user_events_receiver: mpsc::Receiver<T>,
++    nmouse_active: bool,
+ }
+ 
+ /// The touch screen as the mouse: the first finger moves the cursor and holds the left button.
+@@ -38,16 +39,37 @@ struct Touch {
+     finger: Option<u32>,
+ }
+ 
++/// Switch 2 Joy-Con 2 mouse mode + USB mouse via libounce Nmouse.
++#[derive(Default)]
++struct Nmouse {
++    sampling: u64,
++    buttons: u32,
++    entered: bool,
++}
++
+ impl<T: 'static> EventLoop<T> {
+     pub(crate) fn new(_: &PlatformSpecificEventLoopAttributes) -> Result<Self, EventLoopError> {
+         let (user_events_sender, user_events_receiver) = mpsc::channel();
+-        // SAFETY: plain libnx service setup. libnx does not open hid on its own; every input
+-        // read (touch here, the controllers in the game) needs it.
++        // SAFETY: plain libnx/libounce service setup.
+         let rc = unsafe { ffi::hidInitialize() };
+         if rc != 0 {
+             return Err(EventLoopError::Os(os_error!(super::OsError("hidInitialize failed"))));
+         }
+         unsafe { ffi::hidInitializeTouchScreen() };
++        let nmouse_rc = unsafe {
++            ffi::hidInitializeNmouse(std::ptr::null_mut(), 0, WIDTH as i32, HEIGHT as i32, 0)
++        };
++        let nmouse_active = if nmouse_rc == 0 {
++            let _ = unsafe { ffi::hidSetMergedNmouseSourceTypes(ffi::HID_NMOUSE_SOURCES_DEFAULT) };
++            // Map R/L -> Left click (group 1, break/attack), ZR/ZL -> Right click (group 2,
++            // place/use), and stick press -> Middle click (group 3, pick block).
++            let joy_cfg = ffi::HidNmouseButtonConfigJoy { selectors: [1, 2, 0, 0, 0, 0, 3, 0] };
++            let _ = unsafe { ffi::hidSetNmouseButtonConfigJoyRightJcms(&joy_cfg) };
++            let _ = unsafe { ffi::hidSetNmouseButtonConfigJoyLeftJcms(&joy_cfg) };
++            true
++        } else {
++            false
++        };
+         Ok(Self {
+             window_target: event_loop::ActiveEventLoop {
+                 p: ActiveEventLoop {
+@@ -59,6 +81,7 @@ impl<T: 'static> EventLoop<T> {
+             },
+             user_events_sender,
+             user_events_receiver,
++            nmouse_active,
+         })
+     }
+ 
+@@ -76,8 +99,10 @@ impl<T: 'static> EventLoop<T> {
+             };
+         let mut start_cause = StartCause::Init;
+         let mut touch = Touch::default();
++        let mut nmouse = Nmouse::default();
+         let mut focused = false;
+         let mut queued: VecDeque<event::WindowEvent> = VecDeque::new();
++        let mut dev_queued: VecDeque<DeviceEvent> = VecDeque::new();
+ 
+         loop {
+             handler(event::Event::NewEvents(start_cause), target);
+@@ -108,9 +133,15 @@ impl<T: 'static> EventLoop<T> {
+                     window_event(&mut handler, event::WindowEvent::Focused(focused));
+                 }
+                 poll_touch(&mut touch, device_id, &mut queued);
++                if self.nmouse_active {
++                    poll_nmouse(&mut nmouse, device_id, &mut queued, &mut dev_queued);
++                }
+                 while let Some(event) = queued.pop_front() {
+                     window_event(&mut handler, event);
+                 }
++                while let Some(event) = dev_queued.pop_front() {
++                    handler(event::Event::DeviceEvent { device_id, event }, target);
++                }
+                 if !running {
+                     window_event(&mut handler, event::WindowEvent::CloseRequested);
+                 }
+@@ -140,6 +171,9 @@ impl<T: 'static> EventLoop<T> {
+         }
+ 
+         handler(event::Event::LoopExiting, target);
++        if self.nmouse_active {
++            let _ = unsafe { ffi::hidFinalizeNmouse() };
++        }
+         Ok(())
+     }
+ 
+@@ -156,11 +190,11 @@ impl<T: 'static> EventLoop<T> {
+ }
+ 
+ /// Sleeps in short steps until the deadline, a redraw request or a proxy event, polling the
+-/// system at least every few milliseconds so touch and applet messages stay live.
++/// system at least every few milliseconds so touch, nmouse and applet messages stay live at 120 Hz.
+ fn wait(shared: &Shared, until: Option<Instant>) -> StartCause {
+-    const STEP: Duration = Duration::from_millis(4);
++    const STEP: Duration = Duration::from_millis(2);
+     let start = Instant::now();
+-    let limit = start + Duration::from_millis(16);
++    let limit = start + Duration::from_millis(8);
+     loop {
+         if shared.redraw.load(Ordering::SeqCst) || shared.wake.swap(false, Ordering::SeqCst) {
+             return StartCause::WaitCancelled { start, requested_resume: until };
+@@ -220,15 +254,93 @@ fn poll_touch(touch: &mut Touch, device_id: event::DeviceId, out: &mut VecDeque<
+     }
+ }
+ 
++fn poll_nmouse(
++    nmouse: &mut Nmouse,
++    device_id: event::DeviceId,
++    out: &mut VecDeque<event::WindowEvent>,
++    dev_out: &mut VecDeque<DeviceEvent>,
++) {
++    let mut handle = ffi::HidNmouseHandle::default();
++    if unsafe { ffi::hidGetMergedNmouseHandle(&mut handle) } != 0 {
++        return;
++    }
++    let mut state = ffi::HidNmouseStateWithDelta::default();
++    let mut total: usize = 0;
++    if unsafe { ffi::hidGetNmouseStatesWithDelta(handle, &mut state, 1, &mut total) } != 0
++        || total == 0
++        || state.sampling_number == nmouse.sampling
++    {
++        return;
++    }
++    nmouse.sampling = state.sampling_number;
++
++    let moved = state.delta_x != 0 || state.delta_y != 0;
++    if moved {
++        if !nmouse.entered {
++            nmouse.entered = true;
++            out.push_back(event::WindowEvent::CursorEntered { device_id });
++        }
++        out.push_back(event::WindowEvent::CursorMoved {
++            device_id,
++            position: (state.x as f64, state.y as f64).into(),
++        });
++        dev_out.push_back(DeviceEvent::MouseMotion {
++            delta: (state.delta_x as f64, state.delta_y as f64),
++        });
++    }
++
++    let changed = state.buttons ^ nmouse.buttons;
++    if changed != 0 {
++        for (bit, button) in [
++            (ffi::HID_MOUSE_BUTTON_LEFT, MouseButton::Left),
++            (ffi::HID_MOUSE_BUTTON_RIGHT, MouseButton::Right),
++            (ffi::HID_MOUSE_BUTTON_MIDDLE, MouseButton::Middle),
++        ] {
++            if changed & bit != 0 {
++                let pressed = state.buttons & bit != 0;
++                out.push_back(event::WindowEvent::MouseInput {
++                    device_id,
++                    state: if pressed { ElementState::Pressed } else { ElementState::Released },
++                    button,
++                });
++            }
++        }
++        nmouse.buttons = state.buttons;
++    }
++
++    if state.wheel_delta_y != 0 {
++        // Only forward wheel scroll from a real USB/standard mouse: on Joy-Con 2,
++        // Nmouse maps the analog stick to wheel_delta_y, which would rapidly spin the hotbar.
++        let mut type_set: u32 = 0;
++        let is_std_mouse = unsafe { ffi::hidGetNmouseTypeSet(handle, &mut type_set) } == 0
++            && (type_set & ffi::HID_NMOUSE_TYPE_STANDARD_MOUSE) != 0;
++        if is_std_mouse {
++            out.push_back(event::WindowEvent::MouseWheel {
++                device_id,
++                delta: MouseScrollDelta::LineDelta(0.0, state.wheel_delta_y as f32),
++                phase: TouchPhase::Moved,
++            });
++        }
++    }
++}
++
++fn touch_pos(t: &ffi::HidTouchState) -> (f64, f64) {
++    // Horizon's hidGetTouchScreenStates always reports coordinates in 1280x720 space.
++    (
++        (t.x as f64) * (WIDTH as f64 / 1280.0),
++        (t.y as f64) * (HEIGHT as f64 / 720.0),
++    )
++}
++
+ fn cursor(device_id: event::DeviceId, t: &ffi::HidTouchState) -> event::WindowEvent {
+-    event::WindowEvent::CursorMoved { device_id, position: (t.x as f64, t.y as f64).into() }
++    event::WindowEvent::CursorMoved { device_id, position: touch_pos(t).into() }
+ }
+ 
+ fn finger(device_id: event::DeviceId, t: &ffi::HidTouchState, phase: TouchPhase) -> event::Touch {
+     event::Touch {
+         device_id,
+         phase,
+-        location: (t.x as f64, t.y as f64).into(),
++        location: touch_pos(t).into(),
+         force: None,
+         id: t.finger_id as u64,
+     }
+diff --git a/switch/patches/winit-0.30.13/src/platform_impl/nx/mod.rs b/switch/patches/winit-0.30.13/src/platform_impl/nx/mod.rs
+index ba5c025..c536acf 100644
+--- a/switch/patches/winit-0.30.13/src/platform_impl/nx/mod.rs
++++ b/switch/patches/winit-0.30.13/src/platform_impl/nx/mod.rs
+@@ -15,16 +15,21 @@ mod event_loop;
+ pub use self::window::Window;
+ mod window;
+ 
+-/// The framebuffer the game renders into, in both handheld and docked mode (the system scales
+-/// it to the TV).
+-pub(crate) const WIDTH: u32 = 1280;
+-pub(crate) const HEIGHT: u32 = 720;
++/// The framebuffer the game renders into (1080p native on Switch 2).
++pub(crate) const WIDTH: u32 = 1920;
++pub(crate) const HEIGHT: u32 = 1080;
+ 
+ pub(crate) mod ffi {
+     use std::ffi::c_void;
+ 
+     pub const FOCUS_IN_FOCUS: u8 = 1;
+     pub const OPERATION_MODE_CONSOLE: u8 = 1;
++    /// JoyRight (bit 2) | StandardMouse (bit 3): keeps Left Joy-Con stick free for walking.
++    pub const HID_NMOUSE_SOURCES_DEFAULT: u32 = (1 << 2) | (1 << 3);
++    pub const HID_NMOUSE_TYPE_STANDARD_MOUSE: u32 = 1 << 3;
++    pub const HID_MOUSE_BUTTON_LEFT: u32 = 1 << 0;
++    pub const HID_MOUSE_BUTTON_RIGHT: u32 = 1 << 1;
++    pub const HID_MOUSE_BUTTON_MIDDLE: u32 = 1 << 2;
+ 
+     #[repr(C)]
+     #[derive(Clone, Copy, Default)]
+@@ -49,14 +54,69 @@ pub(crate) mod ffi {
+         pub touches: [HidTouchState; 16],
+     }
+ 
++    #[repr(C)]
++    #[derive(Clone, Copy, Default)]
++    pub struct HidNmouseHandle {
++        pub handle: u64,
++    }
++
++    #[repr(C)]
++    #[derive(Clone, Copy, Default)]
++    pub struct HidNmouseStateWithDelta {
++        pub delta_time: u64,
++        pub sampling_number: u64,
++        pub x: i32,
++        pub y: i32,
++        pub delta_x: i32,
++        pub delta_y: i32,
++        pub width: i32,
++        pub height: i32,
++        pub wheel_delta_y: i32,
++        pub unk_x24: u32,
++        pub buttons: u32,
++        pub flags: u32,
++    }
++
++    #[repr(C)]
++    #[derive(Clone, Copy, Default)]
++    pub struct HidNmouseButtonConfigJoy {
++        pub selectors: [u8; 8],
++    }
++
+     extern "C" {
+         pub fn nwindowGetDefault() -> *mut c_void;
++        pub fn nwindowSetDimensions(nw: *mut c_void, width: u32, height: u32) -> u32;
++        pub fn nwindowSetFrameRates(
++            nw: *mut c_void,
++            fps_at_120hz: u32,
++            fps_at_60hz: u32,
++            vrr: bool,
++        ) -> u32;
+         pub fn appletMainLoop() -> bool;
+         pub fn appletGetFocusState() -> u8;
+         pub fn appletGetOperationMode() -> u8;
+         pub fn hidInitialize() -> u32;
+         pub fn hidInitializeTouchScreen();
+         pub fn hidGetTouchScreenStates(states: *mut HidTouchScreenState, count: usize) -> usize;
++        pub fn hidInitializeNmouse(
++            buffer: *mut c_void,
++            size: usize,
++            width: i32,
++            height: i32,
++            pointer_type: u32,
++        ) -> u32;
++        pub fn hidFinalizeNmouse() -> u32;
++        pub fn hidSetMergedNmouseSourceTypes(type_set: u32) -> u32;
++        pub fn hidGetMergedNmouseHandle(out: *mut HidNmouseHandle) -> u32;
++        pub fn hidGetNmouseTypeSet(handle: HidNmouseHandle, out: *mut u32) -> u32;
++        pub fn hidSetNmouseButtonConfigJoyLeftJcms(config: *const HidNmouseButtonConfigJoy) -> u32;
++        pub fn hidSetNmouseButtonConfigJoyRightJcms(config: *const HidNmouseButtonConfigJoy) -> u32;
++        pub fn hidGetNmouseStatesWithDelta(
++            handle: HidNmouseHandle,
++            states: *mut HidNmouseStateWithDelta,
++            count: usize,
++            total_out: *mut usize,
++        ) -> u32;
+     }
+ }
+ 
+@@ -133,7 +193,7 @@ impl MonitorHandle {
+     }
+ 
+     pub fn refresh_rate_millihertz(&self) -> Option<u32> {
+-        Some(60000)
++        Some(120000)
+     }
+ 
+     pub fn video_modes(&self) -> impl Iterator<Item = VideoModeHandle> {
+diff --git a/switch/patches/winit-0.30.13/src/platform_impl/nx/window.rs b/switch/patches/winit-0.30.13/src/platform_impl/nx/window.rs
+index 73f0529..3866848 100644
+--- a/switch/patches/winit-0.30.13/src/platform_impl/nx/window.rs
++++ b/switch/patches/winit-0.30.13/src/platform_impl/nx/window.rs
+@@ -25,6 +25,13 @@ impl Window {
+         if el.shared.window_open.swap(true, Ordering::SeqCst) {
+             return Err(os_error!(super::OsError("the Switch has a single window")));
+         }
++        // Configure the native Switch 2 NWindow to 1920x1080 and request 120 Hz + VRR
++        // before wgpu/OunceVK registers swapchain buffers on it.
++        let nw = unsafe { ffi::nwindowGetDefault() };
++        if !nw.is_null() {
++            let _ = unsafe { ffi::nwindowSetDimensions(nw, WIDTH, HEIGHT) };
++            let _ = unsafe { ffi::nwindowSetFrameRates(nw, 0, 0, true) };
++        }
+         el.shared.pending_create.store(true, Ordering::SeqCst);
+         Ok(Self { shared: el.shared.clone(), created: Arc::new(AtomicBool::new(true)) })
+     }

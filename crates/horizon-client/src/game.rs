@@ -521,7 +521,14 @@ impl Options {
         // shipping game files breaks the Minecraft EULA), then the loose tree beside the NRO,
         // which is the only shippable layout: the user runs horizon-prepare on their own copy.
         let romfs = std::path::Path::new("romfs:/resources");
-        let sibling = exe_dir.join("resources");
+        // horizon_nx::init already changes the Switch process into the NRO's folder.
+        // Joining its fsdev-qualified argv[0] path again makes newlib interpret it as a
+        // relative component (`.../sdmc:/switch/.../resources`).
+        let sibling = if cfg!(target_os = "horizon") {
+            std::path::PathBuf::from("resources")
+        } else {
+            exe_dir.join("resources")
+        };
         let mut o = Self {
             resources: if cfg!(target_os = "horizon") && romfs.join("horizon-resources.json").exists() {
                 romfs.to_path_buf()
@@ -548,7 +555,11 @@ impl Options {
             no_pause: false,
             control: None,
             offscreen: false,
-            window_size: [1280, 720],
+            window_size: if cfg!(target_os = "horizon") {
+                [1920, 1080]
+            } else {
+                [1280, 720]
+            },
             spikes: std::env::var("HORIZON_SPIKES")
                 .ok()
                 .and_then(|v| v.parse().ok()),
@@ -567,7 +578,7 @@ impl Options {
                 on
             }),
             execution_role: execution_role::ExecutionRole::Client,
-            fullscreen: false,
+            fullscreen: cfg!(target_os = "horizon"),
             game_dir: None,
             quick_play: None,
             session_file: std::env::var("HORIZON_SESSION_FILE").ok(),
@@ -16803,7 +16814,9 @@ fn start_game<'a>(
             title.last_server = game.settings.file.string("lastServer");
             title.skip_multiplayer_warning = game.settings.file.bool("skipMultiplayerWarning");
             // Gui.addInitialScreens: the accessibility onboarding comes first.
-            if game.settings.file.bool("onboardAccessibility") {
+            if !cfg!(target_os = "horizon")
+                && game.settings.file.bool("onboardAccessibility")
+            {
                 title.start_onboarding();
             }
             game.title = Some(title);

@@ -91,31 +91,37 @@ const GRAPHICS_PRESET: &[&str] = &["fast", "fancy", "fabulous", "custom"];
 /// view distance tops out at 127 anyway.
 #[cfg(not(target_os = "horizon"))]
 pub const MAX_RENDER_DISTANCE: i32 = 128;
-/// On the Switch, 12 (vanilla's default): its ~3 GiB heap holds the CPU's and the GPU's memory
+/// On Switch 2 (~9 GiB available), vanilla's full 32-chunk range is safe.
+#[cfg(all(target_os = "horizon", feature = "switch2"))]
+pub const MAX_RENDER_DISTANCE: i32 = 32;
+/// On the Switch 1, 12 (vanilla's default): its ~3 GiB heap holds the CPU's and the GPU's memory
 /// alike, and at 30 a world filled it within five minutes and the GPU device was lost.
-#[cfg(target_os = "horizon")]
+#[cfg(all(target_os = "horizon", not(feature = "switch2")))]
 pub const MAX_RENDER_DISTANCE: i32 = 12;
 /// Simulation distance's cap: vanilla's 32.
 #[cfg(not(target_os = "horizon"))]
 pub const MAX_SIMULATION_DISTANCE: i32 = 32;
-/// On the Switch, 12 as the render distance: the server keeps and ticks every chunk within it, in
+/// On Switch 2, allow up to 20 chunks of simulation distance.
+#[cfg(all(target_os = "horizon", feature = "switch2"))]
+pub const MAX_SIMULATION_DISTANCE: i32 = 20;
+/// On the Switch 1, 12 as the render distance: the server keeps and ticks every chunk within it, in
 /// the same heap.
-#[cfg(target_os = "horizon")]
+#[cfg(all(target_os = "horizon", not(feature = "switch2")))]
 pub const MAX_SIMULATION_DISTANCE: i32 = 12;
-/// Clouds' default reach in chunks: vanilla's 128.
-#[cfg(not(target_os = "horizon"))]
+/// Clouds' default reach in chunks: vanilla's 128 (and Switch 2).
+#[cfg(any(not(target_os = "horizon"), feature = "switch2"))]
 pub const DEFAULT_CLOUD_RANGE: i32 = 128;
-/// On the Switch, 32 (vanilla's Fast preset sets it too): Fancy clouds at 128 chunks were one
+/// On the Switch 1, 32 (vanilla's Fast preset sets it too): Fancy clouds at 128 chunks were one
 /// draw of ~222k vertices and 2.2 ms of a frame, at 32 chunks 0.8 ms (RUN 31-32). The menu still
 /// goes to 128.
-#[cfg(target_os = "horizon")]
+#[cfg(all(target_os = "horizon", not(feature = "switch2")))]
 pub const DEFAULT_CLOUD_RANGE: i32 = 32;
-/// Cutout Leaves' default: vanilla's on (see-through leaves).
-#[cfg(not(target_os = "horizon"))]
+/// Cutout Leaves' default: vanilla's on (see-through leaves), also default on Switch 2.
+#[cfg(any(not(target_os = "horizon"), feature = "switch2"))]
 pub const DEFAULT_CUTOUT_LEAVES: bool = true;
-/// On the Switch, off (solid leaves, as vanilla's Fast preset sets): in a forest, on drew 3.3x the
+/// On the Switch 1, off (solid leaves, as vanilla's Fast preset sets): in a forest, on drew 3.3x the
 /// triangles and cost ~12 ms a frame (RUN 34: 35 fps against 59). The menu still turns it on.
-#[cfg(target_os = "horizon")]
+#[cfg(all(target_os = "horizon", not(feature = "switch2")))]
 pub const DEFAULT_CUTOUT_LEAVES: bool = false;
 const INACTIVITY: &[&str] = &["minimized", "afk"];
 const CLOUDS: &[&str] = &["false", "fast", "true"];
@@ -155,7 +161,10 @@ static TABLE: LazyLock<Vec<Def>> = LazyLock::new(|| {
             V::Double(0.75),
         ),
         b("cutoutLeaves", DEFAULT_CUTOUT_LEAVES),
-        b("enableVsync", true),
+        b(
+            "enableVsync",
+            !cfg!(all(target_os = "horizon", feature = "switch2")),
+        ),
         def(
             "entityDistanceScaling",
             O(Scaled(2, 20, 4.0, 0.5, 5.0)),

@@ -697,8 +697,12 @@ pub mod horizon_stubs {
     /// `svc::IdealCoreDontCare`: no preferred core. (Not `IdealCoreNoUpdate`, -3: with the
     /// don't-care ideal pthread_create leaves, the kernel rejects it, `kern_k_thread.cpp`.)
     const IDEAL_CORE_DONT_CARE: i32 = -1;
-    /// Cores 0-2. Core 3 belongs to the system; it is never chosen even if the process may use it.
+    /// Switch 1: cores 0-2 (core 3 belongs to the system).
+    /// Switch 2: allow all cores the kernel grants this process in `InfoType_CoreMask`.
+    #[cfg(not(feature = "switch2"))]
     const APPLICATION_CORES: u64 = 0b0111;
+    #[cfg(feature = "switch2")]
+    const APPLICATION_CORES: u64 = u64::MAX;
 
     unsafe extern "C" {
         // libnx's wrappers are bare `svc` instructions; u64 masks keep the registers' upper
@@ -726,7 +730,7 @@ pub mod horizon_stubs {
     /// with the main thread: with cores 0-2, n = 0, 1, 2, 3 gives cores 1, 2, 0, 1.
     fn nth_core(mask: u64, n: u32) -> i32 {
         let cores = mask.count_ones().max(1);
-        let order = (0u32..4).map(|i| (i + 1) % 4).filter(|&core| mask & (1u64 << core) != 0);
+        let order = (0u32..64).map(|i| (i + 1) % 64).filter(|&core| mask & (1u64 << core) != 0);
         order.cycle().nth((n % cores) as usize).unwrap_or(0) as i32
     }
 
@@ -993,9 +997,11 @@ pub mod horizon_stubs {
         Some(result)
     }
 
+    #[cfg(not(feature = "switch2"))]
     #[unsafe(no_mangle)]
     pub extern "C" fn _init() {}
 
+    #[cfg(not(feature = "switch2"))]
     #[unsafe(no_mangle)]
     pub extern "C" fn _fini() {}
 
@@ -1292,6 +1298,179 @@ pub mod horizon_stubs {
         if let Some(asked) = set {
             log::info!("swapchains get {images} images (HORIZON_NX_SWAPCHAIN_IMAGES={asked})");
         }
+    }
+
+    // pthread keys, wrapped (-Wl,--wrap=pthread_key_create/delete, pthread_get/setspecific):
+    // libnx/libounce keeps pthread keys in the thread's TLS slots (~27 of them), while Rust with
+    // `has-thread-local: false` allocates one key per `thread_local!`. Without this table, the
+    // process aborts with `fatal runtime error: out of TLS keys` as soon as the ~28th thread-local
+    // is touched (e.g. first button press on the title screen).
+    const NX_KEYS: usize = 1024;
+    const EAGAIN: c_int = 11;
+    const ENOMEM: c_int = 12;
+
+    type PthreadKey = u32;
+    type PthreadDtor = unsafe extern "C" fn(*mut c_void);
+
+    unsafe extern "C" {
+        fn __real_pthread_key_create(key: *mut PthreadKey, dtor: Option<PthreadDtor>) -> c_int;
+        fn __real_pthread_getspecific(key: PthreadKey) -> *mut c_void;
+        fn __real_pthread_setspecific(key: PthreadKey, value: *const c_void) -> c_int;
+        fn calloc(nmemb: usize, size: usize) -> *mut c_void;
+    }
+
+    static NX_KEY_LOCK: AtomicBool = AtomicBool::new(false);
+    static NX_SLOT_READY: AtomicBool = AtomicBool::new(false);
+    static NX_SLOT: AtomicU32 = AtomicU32::new(0);
+    static mut NX_DTORS: [Option<PthreadDtor>; NX_KEYS] = [None; NX_KEYS];
+    static mut NX_USED: [u8; NX_KEYS] = [0; NX_KEYS];
+    static mut NX_NEXT: usize = 0;
+
+    fn nx_key_lock() {
+        while NX_KEY_LOCK
+            .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .is_err()
+        {
+            core::hint::spin_loop();
+        }
+    }
+
+    fn nx_key_unlock() {
+        NX_KEY_LOCK.store(false, Ordering::Release);
+    }
+
+    unsafe extern "C" fn nx_run_dtors(table: *mut c_void) {
+        let t = table.cast::<*mut c_void>();
+        let slot = NX_SLOT.load(Ordering::Acquire);
+        unsafe { __real_pthread_setspecific(slot, table) };
+        for _ in 0..4 {
+            let mut again = false;
+            for k in 0..NX_KEYS {
+                let v = unsafe { *t.add(k) };
+                if !v.is_null() {
+                    nx_key_lock();
+                    let dtor = unsafe { NX_DTORS[k] };
+                    nx_key_unlock();
+                    if let Some(dtor) = dtor {
+                        unsafe { *t.add(k) = core::ptr::null_mut() };
+                        unsafe { dtor(v) };
+                        again = true;
+                    }
+                }
+            }
+            if !again {
+                break;
+            }
+        }
+        unsafe {
+            __real_pthread_setspecific(slot, core::ptr::null());
+            free(table);
+        }
+    }
+
+    fn nx_ensure_slot() -> PthreadKey {
+        if NX_SLOT_READY.load(Ordering::Acquire) {
+            return NX_SLOT.load(Ordering::Acquire);
+        }
+        nx_key_lock();
+        if !NX_SLOT_READY.load(Ordering::Relaxed) {
+            let mut slot: PthreadKey = 0;
+            unsafe { __real_pthread_key_create(&mut slot, Some(nx_run_dtors)) };
+            NX_SLOT.store(slot, Ordering::Release);
+            NX_SLOT_READY.store(true, Ordering::Release);
+        }
+        let slot = NX_SLOT.load(Ordering::Acquire);
+        nx_key_unlock();
+        slot
+    }
+
+    unsafe fn nx_table(create: bool) -> *mut *mut c_void {
+        let slot = nx_ensure_slot();
+        let mut t = unsafe { __real_pthread_getspecific(slot) }.cast::<*mut c_void>();
+        if t.is_null() && create {
+            t = unsafe { calloc(NX_KEYS, core::mem::size_of::<*mut c_void>()) }.cast::<*mut c_void>();
+            if !t.is_null() {
+                unsafe { __real_pthread_setspecific(slot, t.cast()) };
+            }
+        }
+        t
+    }
+
+    #[unsafe(no_mangle)]
+    pub unsafe extern "C" fn __wrap_pthread_key_create(
+        key: *mut PthreadKey,
+        dtor: Option<PthreadDtor>,
+    ) -> c_int {
+        let _ = nx_ensure_slot();
+        nx_key_lock();
+        let mut k = unsafe { NX_NEXT };
+        while k < NX_KEYS && unsafe { NX_USED[k] } != 0 {
+            k += 1;
+        }
+        if k >= NX_KEYS {
+            k = 0;
+            while k < NX_KEYS && unsafe { NX_USED[k] } != 0 {
+                k += 1;
+            }
+        }
+        if k >= NX_KEYS {
+            nx_key_unlock();
+            return EAGAIN;
+        }
+        unsafe {
+            NX_USED[k] = 1;
+            NX_DTORS[k] = dtor;
+            NX_NEXT = k + 1;
+            *key = k as PthreadKey;
+        }
+        nx_key_unlock();
+        0
+    }
+
+    #[unsafe(no_mangle)]
+    pub unsafe extern "C" fn __wrap_pthread_key_delete(key: PthreadKey) -> c_int {
+        let k = key as usize;
+        if k >= NX_KEYS {
+            return EINVAL;
+        }
+        nx_key_lock();
+        unsafe {
+            NX_USED[k] = 0;
+            NX_DTORS[k] = None;
+        }
+        nx_key_unlock();
+        0
+    }
+
+    #[unsafe(no_mangle)]
+    pub unsafe extern "C" fn __wrap_pthread_getspecific(key: PthreadKey) -> *mut c_void {
+        let k = key as usize;
+        if k >= NX_KEYS {
+            return core::ptr::null_mut();
+        }
+        let t = unsafe { nx_table(false) };
+        if t.is_null() {
+            core::ptr::null_mut()
+        } else {
+            unsafe { *t.add(k) }
+        }
+    }
+
+    #[unsafe(no_mangle)]
+    pub unsafe extern "C" fn __wrap_pthread_setspecific(
+        key: PthreadKey,
+        value: *const c_void,
+    ) -> c_int {
+        let k = key as usize;
+        if k >= NX_KEYS {
+            return EINVAL;
+        }
+        let t = unsafe { nx_table(true) };
+        if t.is_null() {
+            return ENOMEM;
+        }
+        unsafe { *t.add(k) = value.cast_mut() };
+        0
     }
 }
 

@@ -4,6 +4,7 @@ mod ffi {
 
     unsafe extern "C" {
         pub fn romfsMountSelf(name: *const c_char) -> u32;
+        pub fn romfsMountFromFsdev(path: *const c_char, offset: u64, name: *const c_char) -> u32;
         pub fn romfsUnmount(name: *const c_char) -> u32;
         pub fn socketInitialize(config: *const c_void) -> u32;
         pub fn socketExit();
@@ -76,6 +77,36 @@ mod focus {
 /// Set once `romfsMountSelf` succeeds, so `release_horizon_services` knows what to undo.
 #[cfg(target_os = "horizon")]
 static ROMFS_MOUNTED: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
+/// Mounts a RomFS image stored beside the NRO when no RomFS was embedded in it.
+/// Keeping the large, user-prepared resource tree outside the executable avoids
+/// homebrew-loader image-size limits while still giving the game normal files.
+#[cfg(target_os = "horizon")]
+pub fn mount_external_romfs(path: &std::path::Path) {
+    use crate::logging::ResultCode;
+    use core::sync::atomic::Ordering;
+
+    // Do not use Path::is_file here. The Horizon/newlib stat shim is deliberately
+    // minimal and may report false for an fsdev path even though fsdev can open it.
+    if ROMFS_MOUNTED.load(Ordering::SeqCst) {
+        return;
+    }
+    let Ok(path) = std::ffi::CString::new(path.to_string_lossy().as_bytes()) else {
+        log::warn!("external RomFS path contains a NUL byte");
+        return;
+    };
+    let result = unsafe { ffi::romfsMountFromFsdev(path.as_ptr(), 0, c"romfs".as_ptr()) };
+    if result == 0 {
+        ROMFS_MOUNTED.store(true, Ordering::SeqCst);
+        log::info!("external RomFS mounted from {}", path.to_string_lossy());
+    } else {
+        log::warn!(
+            "external RomFS mount failed for {}: {}",
+            path.to_string_lossy(),
+            ResultCode(result)
+        );
+    }
+}
 /// Set once `socketInitialize` succeeds. Sockets lock 2.2 MiB of the heap until `socketExit`
 /// and the socket service has let go of it.
 #[cfg(target_os = "horizon")]

@@ -41,7 +41,7 @@ mod ffi {
     }
 
     // The top-down region's API (bevy-horizon's `patches/mesa-switch/`), in NVK.
-    #[cfg(feature = "vulkan")]
+    #[cfg(all(feature = "vulkan", not(feature = "switch2")))]
     unsafe extern "C" {
         /// The region's extent and the bytes in its blocks, GPU and CPU, now and at the most,
         /// and how many GPU blocks it couldn't place. Takes the region's lock; doesn't allocate.
@@ -209,14 +209,14 @@ pub(crate) struct MallocFigures {
     holes: usize,
     /// The top-down region at the top of the heap, free runs in it included.
     region: u64,
-    #[cfg(feature = "vulkan")]
+    #[cfg(all(feature = "vulkan", not(feature = "switch2")))]
     region_blocks: RegionBlocks,
     #[cfg(feature = "top_down_alloc")]
     rust: crate::allocator::Figures,
 }
 
 /// The region's blocks, from `nouveau_horizon_region_stats`.
-#[cfg(feature = "vulkan")]
+#[cfg(all(feature = "vulkan", not(feature = "switch2")))]
 #[derive(Default)]
 struct RegionBlocks {
     /// Bytes in blocks, GPU and Rust's, now and at the most.
@@ -231,7 +231,7 @@ impl MallocFigures {
         let info = unsafe { ffi::mallinfo() };
         let heap = heap_size();
         let region = top_down_region();
-        #[cfg(feature = "vulkan")]
+        #[cfg(all(feature = "vulkan", not(feature = "switch2")))]
         let region_blocks = {
             let (mut extent, mut blocks) = (0u64, RegionBlocks::default());
             unsafe {
@@ -252,7 +252,7 @@ impl MallocFigures {
                 + info.keepcost as u64,
             holes: info.fordblks.saturating_sub(info.keepcost),
             region,
-            #[cfg(feature = "vulkan")]
+            #[cfg(all(feature = "vulkan", not(feature = "switch2")))]
             region_blocks,
             #[cfg(feature = "top_down_alloc")]
             rust: crate::allocator::figures(),
@@ -273,7 +273,7 @@ impl core::fmt::Display for MallocFigures {
         )?;
         if self.region != 0 {
             write!(f, "; the top-down region above the top: {:.1} MiB", mib(self.region))?;
-            #[cfg(feature = "vulkan")]
+            #[cfg(all(feature = "vulkan", not(feature = "switch2")))]
             {
                 let blocks = &self.region_blocks;
                 #[cfg(not(feature = "top_down_alloc"))]
@@ -289,7 +289,7 @@ impl core::fmt::Display for MallocFigures {
                 write!(f, ", {:.1} MiB at the most", mib(blocks.peak))?;
             }
         }
-        #[cfg(feature = "vulkan")]
+        #[cfg(all(feature = "vulkan", not(feature = "switch2")))]
         if self.region_blocks.gpu_fallbacks != 0 {
             write!(
                 f,

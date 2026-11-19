@@ -3,17 +3,32 @@ use std::path::PathBuf;
 fn main() {
     let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
     if target_os == "horizon" {
-        println!("cargo:rustc-link-search=native=/opt/devkitpro/libnx/lib");
-        println!("cargo:rustc-link-search=native=/opt/devkitpro/portlibs/switch/lib");
-        println!("cargo:rustc-link-search=native=/opt/devkitpro/devkitA64/aarch64-none-elf/lib/pic");
-        println!("cargo:rustc-link-search=native=/opt/devkitpro/devkitA64/lib/gcc/aarch64-none-elf/16.1.0/pic");
+        let devkitpro = std::env::var("DEVKITPRO").unwrap_or_else(|_| "/opt/devkitpro".into());
+        let switch2 = std::env::var_os("CARGO_FEATURE_SWITCH2").is_some();
+        if switch2 {
+            println!("cargo:rustc-link-search=native={devkitpro}/libounce/lib");
+            println!("cargo:rustc-link-search=native={devkitpro}/portlibs/switch2/lib");
+        } else {
+            println!("cargo:rustc-link-search=native={devkitpro}/libnx/lib");
+            println!("cargo:rustc-link-search=native={devkitpro}/portlibs/switch/lib");
+        }
+        println!("cargo:rustc-link-search=native={devkitpro}/devkitA64/aarch64-none-elf/lib/pic");
+        println!("cargo:rustc-link-search=native={devkitpro}/devkitA64/lib/gcc/aarch64-none-elf/15.2.0/pic");
         println!("cargo:rustc-link-lib=nx");
         println!("cargo:rustc-link-lib=sysbase");
         println!("cargo:rustc-link-lib=c");
         println!("cargo:rustc-link-lib=m");
         println!("cargo:rustc-link-lib=gcc");
         if std::env::var_os("CARGO_FEATURE_VULKAN").is_some() {
-            link_nvk();
+            if switch2 {
+                // OunceVK is packaged as the ordinary static Vulkan library.
+                // It owns GPU memory itself, so the Switch 1 top-down allocator
+                // and its nouveau_horizon_* entry points are intentionally not
+                // linked in this mode.
+                println!("cargo:rustc-link-lib=vulkan");
+            } else {
+                link_nvk();
+            }
         }
     }
 }

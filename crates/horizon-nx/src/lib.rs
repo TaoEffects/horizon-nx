@@ -12,6 +12,7 @@
 //! writer; call it first thing in `main`. `flush_logs` and `process_applet_messages` are for the
 //! game loop (Phase 2); `software_keyboard` shows the system keyboard for text entry.
 
+pub mod audio;
 pub mod compat;
 pub mod lifecycle;
 pub mod logging;
@@ -20,7 +21,7 @@ pub mod logging;
 mod memory;
 #[cfg(all(target_os = "horizon", feature = "top_down_alloc"))]
 mod allocator;
-#[cfg(all(target_os = "horizon", feature = "vulkan"))]
+#[cfg(all(target_os = "horizon", feature = "vulkan", not(feature = "switch2")))]
 pub mod nvk_tune;
 #[cfg(target_os = "horizon")]
 pub mod profiler;
@@ -79,10 +80,13 @@ pub fn init() {
         // starts there (Ryujinx passes the NRO at the SD root, cwd = sdmc:/).
         if let Some(dir) = nro_dir() {
             match std::env::set_current_dir(&dir) {
-                Ok(()) => crate::logging::write_log_line(format_args!(
-                    "[Boot] working directory -> {} (the NRO's folder)",
-                    dir.display()
-                )),
+                Ok(()) => {
+                    crate::logging::write_log_line(format_args!(
+                        "[Boot] working directory -> {} (the NRO's folder)",
+                        dir.display()
+                    ));
+                    lifecycle::mount_external_romfs(&dir.join("resources.romfs"));
+                }
                 Err(e) => crate::logging::write_log_line(format_args!(
                     "[Boot] could not enter {}: {e}; files must go where the loader's cwd points",
                     dir.display()
@@ -109,11 +113,11 @@ pub fn init() {
         #[cfg(feature = "top_down_alloc")]
         allocator::configure_from_env();
         // ZCULL direction for reversed depth, unless BEVY_HORIZON_ZCULL_DIR=less (nvk_tune.rs).
-        #[cfg(feature = "vulkan")]
+        #[cfg(all(feature = "vulkan", not(feature = "switch2")))]
         nvk_tune::configure_from_env();
         // NVK's Switch WSI reads `bh_wsi_switch_image_count` (compat.rs) when it makes a
         // swapchain; set it from the env before any surface exists.
-        #[cfg(feature = "vulkan")]
+        #[cfg(all(feature = "vulkan", not(feature = "switch2")))]
         compat::horizon_stubs::set_swapchain_images();
         // The clocks into the log, and HORIZON_NX_GPU_CLOCKS's faster ones for a diagnostic run
         // (clocks.rs), before the boost stands in for them.

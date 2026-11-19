@@ -243,6 +243,7 @@ impl Edges {
 /// Horizon's pad-only actions (no vanilla key mapping).
 pub const HOTBAR_PREVIOUS: &str = "pad.hotbarPrevious";
 pub const HOTBAR_NEXT: &str = "pad.hotbarNext";
+pub const TOGGLE_DEBUG: &str = "pad.toggleDebug";
 
 /// Bindable actions and their default buttons: vanilla key mappings (the
 /// game acts as their default key) and Horizon's pad-only actions. Start is
@@ -262,6 +263,13 @@ pub const ACTIONS: &[(&str, Option<Button>)] = &[
     ("key.pickItem", Some(Button::DPadLeft)),
     ("key.chat", Some(Button::DPadRight)),
     ("key.advancements", Some(Button::DPadDown)),
+    #[cfg(target_os = "horizon")]
+    (TOGGLE_DEBUG, Some(Button::Select)),
+    #[cfg(not(target_os = "horizon"))]
+    (TOGGLE_DEBUG, None),
+    #[cfg(target_os = "horizon")]
+    ("key.playerlist", None),
+    #[cfg(not(target_os = "horizon"))]
     ("key.playerlist", Some(Button::Select)),
     ("key.command", None),
     ("key.screenshot", None),
@@ -275,6 +283,7 @@ pub fn action_caption(action: &str) -> &str {
     match action {
         HOTBAR_PREVIOUS => "Hotbar: Previous Slot",
         HOTBAR_NEXT => "Hotbar: Next Slot",
+        TOGGLE_DEBUG => "Debug Screen (F3)",
         other => other,
     }
 }

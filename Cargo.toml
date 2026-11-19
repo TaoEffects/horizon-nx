@@ -61,6 +61,18 @@ wgpu-hal = { path = "third_party/wgpu-hal" }
 # vibration); every other platform's code is the release's. Drop this and the folder once a
 # gilrs-core release has a Horizon backend.
 gilrs-core = { path = "third_party/gilrs-core" }
+# Horizon's console support crates are maintained in the companion porting
+# toolkit. The Switch 2 build reuses their Horizon/newlib platform work while
+# replacing the Switch 1 Vulkan driver with OunceVK.
+libc = { path = "../horizon-switch-toolkit/switch/patches/libc-0.2.191" }
+getrandom02 = { package = "getrandom", path = "../horizon-switch-toolkit/switch/patches/getrandom-0.2.17" }
+getrandom = { path = "../horizon-switch-toolkit/switch/patches/getrandom-0.3.4" }
+winit = { path = "../horizon-switch-toolkit/switch/patches/winit-0.30.13" }
+arboard = { path = "../horizon-switch-toolkit/switch/patches/arboard-nx" }
+ring = { path = "../horizon-switch-toolkit/switch/patches/ring-0.17.14" }
+wgpu = { path = "../horizon-switch-toolkit/switch/patches/wgpu-30.0.1" }
+wgpu-core = { path = "../horizon-switch-toolkit/switch/patches/wgpu-core-30.0.1" }
+wgpu-core-deps-windows-linux-android = { path = "../horizon-switch-toolkit/switch/patches/wgpu-core-deps-windows-linux-android-30.0.1" }
 
 # Line tables keep file:line in backtraces; full debug info made every
 # example and test binary hundreds of megabytes and slow to link.

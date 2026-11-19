@@ -598,7 +598,9 @@ impl Graphics {
         // `Unsupported`), so the fallback would leave one worker on a three-core app. libnx
         // gives applications cores 0-2; core 3 is reserved for the system (compat.rs's
         // `sysconf` reports the same).
-        let cores = if cfg!(target_os = "horizon") {
+        let cores = if cfg!(all(target_os = "horizon", feature = "switch2")) {
+            6
+        } else if cfg!(target_os = "horizon") {
             3
         } else {
             std::thread::available_parallelism().map_or(2, |n| n.get())
@@ -622,12 +624,22 @@ impl Graphics {
 /// A preset's values for vanilla's options and Horizon's own.
 pub fn apply_preset(preset: Preset, s: &mut crate::settings::Settings) {
     let (rd, sim, clouds, particles, shadows, blend, mipmaps, entity, leaves, weather_r) =
-        match preset {
-            Preset::Performance => (8, 6, "false", 2, false, 0, 0, 0.5, false, 3),
-            Preset::Balanced => (12, 8, "fast", 1, true, 1, 2, 0.75, true, 5),
-            Preset::Quality => (16, 12, "true", 0, true, 2, 4, 1.0, true, 10),
-            Preset::Ultra => (24, 12, "true", 0, true, 3, 4, 1.5, true, 10),
-            Preset::Custom => return,
+        if cfg!(all(target_os = "horizon", feature = "switch2")) {
+            match preset {
+                Preset::Performance => (10, 8, "fast", 2, false, 0, 2, 0.75, false, 3),
+                Preset::Balanced => (14, 10, "fast", 1, true, 1, 4, 1.0, true, 5),
+                Preset::Quality => (18, 12, "true", 0, true, 2, 4, 1.0, true, 8),
+                Preset::Ultra => (24, 16, "true", 0, true, 3, 4, 1.25, true, 10),
+                Preset::Custom => return,
+            }
+        } else {
+            match preset {
+                Preset::Performance => (8, 6, "false", 2, false, 0, 0, 0.5, false, 3),
+                Preset::Balanced => (12, 8, "fast", 1, true, 1, 2, 0.75, true, 5),
+                Preset::Quality => (16, 12, "true", 0, true, 2, 4, 1.0, true, 10),
+                Preset::Ultra => (24, 12, "true", 0, true, 3, 4, 1.5, true, 10),
+                Preset::Custom => return,
+            }
         };
     // Capped where the game caps the option (`MAX_RENDER_DISTANCE`: 12 on the Switch).
     s.render_distance = rd.min(crate::options_file::MAX_RENDER_DISTANCE);

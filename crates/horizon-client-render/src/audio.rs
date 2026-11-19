@@ -137,10 +137,15 @@ fn attach(mixer: &Mutex<Mixer>, channel: ChannelId, samples: Samples, looping: b
     }
 }
 /// The open output stream. A build without the `audio` feature (the server build, which must not
-/// need libasound) never has one.
+/// need libasound) never has one, except Switch 2 which uses `horizon_nx::audio::AudioOutStream`.
 #[cfg(feature = "audio")]
 type Stream = cpal::Stream;
-#[cfg(not(feature = "audio"))]
+#[cfg(all(target_os = "horizon", feature = "switch2", not(feature = "audio")))]
+type Stream = horizon_nx::audio::AudioOutStream;
+#[cfg(all(
+    not(feature = "audio"),
+    not(all(target_os = "horizon", feature = "switch2"))
+))]
 type Stream = std::convert::Infallible;
 pub struct Audio {
     _stream: Option<Stream>,
@@ -566,7 +571,18 @@ pub fn output_devices() -> Vec<String> {
     names
 }
 
-#[cfg(not(feature = "audio"))]
+#[cfg(all(target_os = "horizon", feature = "switch2", not(feature = "audio")))]
+pub fn output_devices() -> Vec<String> {
+    if std::env::var_os("HORIZON_NO_AUDIO").is_some() {
+        return Vec::new();
+    }
+    vec!["Nintendo Switch 2 Audio".into()]
+}
+
+#[cfg(all(
+    not(feature = "audio"),
+    not(all(target_os = "horizon", feature = "switch2"))
+))]
 pub fn output_devices() -> Vec<String> {
     Vec::new()
 }
@@ -639,7 +655,24 @@ impl Audio {
             preview: Default::default(),
         }
     }
-    #[cfg(not(feature = "audio"))]
+    #[cfg(all(target_os = "horizon", feature = "switch2", not(feature = "audio")))]
+    fn open_named(mixer: Arc<Mutex<Mixer>>, _: &str) -> Result<Stream> {
+        if std::env::var_os("HORIZON_NO_AUDIO").is_some() {
+            return Err("audio disabled by HORIZON_NO_AUDIO".into());
+        }
+        horizon_nx::audio::AudioOutStream::open(move |scratch, channels, rate| {
+            if let Ok(mut m) = mixer.lock() {
+                mix(&mut m, scratch, channels, rate);
+            } else {
+                scratch.fill(0.0);
+            }
+        })
+        .map_err(Into::into)
+    }
+    #[cfg(all(
+        not(feature = "audio"),
+        not(all(target_os = "horizon", feature = "switch2"))
+    ))]
     fn open_named(_: Arc<Mutex<Mixer>>, _: &str) -> Result<Stream> {
         Err("this build has no sound output (built without the `audio` feature)".into())
     }

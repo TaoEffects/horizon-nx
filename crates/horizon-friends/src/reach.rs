@@ -68,6 +68,7 @@ fn virtual_interface(name: &str) -> bool {
 /// IPv6. No link-local or unique-local; loopback on request.
 pub fn interface_addresses(loopback: bool) -> Vec<IpAddr> {
     let mut found: Vec<(u8, IpAddr)> = Vec::new();
+    #[cfg(not(target_os = "horizon"))]
     for i in if_addrs::get_if_addrs().unwrap_or_default() {
         if virtual_interface(&i.name) {
             continue;
@@ -95,6 +96,10 @@ pub fn interface_addresses(loopback: bool) -> Vec<IpAddr> {
         if !found.iter().any(|(_, a)| *a == ip) {
             found.push((rank, ip));
         }
+    }
+    #[cfg(target_os = "horizon")]
+    if loopback {
+        found.push((6, IpAddr::V4(Ipv4Addr::LOCALHOST)));
     }
     found.sort_by_key(|(r, _)| *r);
     // One global IPv6 address is enough (temporary addresses multiply

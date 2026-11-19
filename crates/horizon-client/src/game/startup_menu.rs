@@ -86,7 +86,7 @@ impl StartupMenu {
             title.last_server = settings.file.string("lastServer");
             title.skip_multiplayer_warning = settings.file.bool("skipMultiplayerWarning");
             // Gui.addInitialScreens: the accessibility onboarding comes first.
-            if settings.file.bool("onboardAccessibility") {
+            if !cfg!(target_os = "horizon") && settings.file.bool("onboardAccessibility") {
                 title.start_onboarding();
             }
             self.title = Some(title);

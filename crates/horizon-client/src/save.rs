@@ -282,12 +282,17 @@ pub const LOW_DISK_SPACE: u64 = 67_108_864;
 /// `LevelStorageAccess.estimateDiskSpace`: the usable bytes of the disk holding `dir`
 /// (`FileStore.getUsableSpace`), `u64::MAX` when it cannot be asked.
 pub fn estimate_disk_space(dir: &Path) -> u64 {
-    #[cfg(unix)]
+    #[cfg(all(unix, not(target_os = "horizon")))]
     {
         match rustix::fs::statvfs(dir) {
             Ok(stat) => stat.f_bavail.saturating_mul(stat.f_frsize),
             Err(_) => u64::MAX,
         }
+    }
+    #[cfg(target_os = "horizon")]
+    {
+        let _ = dir;
+        u64::MAX
     }
     #[cfg(windows)]
     {
