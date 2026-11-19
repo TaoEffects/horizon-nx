@@ -768,6 +768,7 @@ pub enum Opt {
     JapaneseGlyphs,
     /// Horizon's controller settings (`horizon-controller.txt`).
     PadEnabled,
+    PadMouseMode,
     PadVibration,
     PadAdaptiveTriggers,
     PadLightbar,

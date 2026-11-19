@@ -1,5 +1,5 @@
 diff --git a/switch/patches/winit-0.30.13/src/platform_impl/nx/event_loop.rs b/switch/patches/winit-0.30.13/src/platform_impl/nx/event_loop.rs
-index 1c02678..1e04893 100644
+index 1c02678..4748cb3 100644
 --- a/switch/patches/winit-0.30.13/src/platform_impl/nx/event_loop.rs
 +++ b/switch/patches/winit-0.30.13/src/platform_impl/nx/event_loop.rs
 @@ -6,13 +6,13 @@ use std::sync::{mpsc, Arc};
@@ -126,7 +126,7 @@ index 1c02678..1e04893 100644
      loop {
          if shared.redraw.load(Ordering::SeqCst) || shared.wake.swap(false, Ordering::SeqCst) {
              return StartCause::WaitCancelled { start, requested_resume: until };
-@@ -220,15 +254,93 @@ fn poll_touch(touch: &mut Touch, device_id: event::DeviceId, out: &mut VecDeque<
+@@ -220,15 +254,95 @@ fn poll_touch(touch: &mut Touch, device_id: event::DeviceId, out: &mut VecDeque<
      }
  }
  
@@ -150,6 +150,10 @@ index 1c02678..1e04893 100644
 +    }
 +    nmouse.sampling = state.sampling_number;
 +
++    let mut type_set: u32 = 0;
++    let is_std_mouse = unsafe { ffi::hidGetNmouseTypeSet(handle, &mut type_set) } == 0
++        && (type_set & ffi::HID_NMOUSE_TYPE_STANDARD_MOUSE) != 0;
++
 +    let moved = state.delta_x != 0 || state.delta_y != 0;
 +    if moved {
 +        if !nmouse.entered {
@@ -165,32 +169,30 @@ index 1c02678..1e04893 100644
 +        });
 +    }
 +
-+    let changed = state.buttons ^ nmouse.buttons;
-+    if changed != 0 {
-+        for (bit, button) in [
-+            (ffi::HID_MOUSE_BUTTON_LEFT, MouseButton::Left),
-+            (ffi::HID_MOUSE_BUTTON_RIGHT, MouseButton::Right),
-+            (ffi::HID_MOUSE_BUTTON_MIDDLE, MouseButton::Middle),
-+        ] {
-+            if changed & bit != 0 {
-+                let pressed = state.buttons & bit != 0;
-+                out.push_back(event::WindowEvent::MouseInput {
-+                    device_id,
-+                    state: if pressed { ElementState::Pressed } else { ElementState::Released },
-+                    button,
-+                });
++    // For a real USB/standard mouse, forward mouse buttons and scroll wheel.
++    // For Joy-Con 2, buttons (R/ZR/L/ZL) are handled cleanly by gilrs/Mouse Mode
++    // without double-firing, and the analog stick does not spam wheel_delta_y.
++    if is_std_mouse {
++        let changed = state.buttons ^ nmouse.buttons;
++        if changed != 0 {
++            for (bit, button) in [
++                (ffi::HID_MOUSE_BUTTON_LEFT, MouseButton::Left),
++                (ffi::HID_MOUSE_BUTTON_RIGHT, MouseButton::Right),
++                (ffi::HID_MOUSE_BUTTON_MIDDLE, MouseButton::Middle),
++            ] {
++                if changed & bit != 0 {
++                    let pressed = state.buttons & bit != 0;
++                    out.push_back(event::WindowEvent::MouseInput {
++                        device_id,
++                        state: if pressed { ElementState::Pressed } else { ElementState::Released },
++                        button,
++                    });
++                }
 +            }
++            nmouse.buttons = state.buttons;
 +        }
-+        nmouse.buttons = state.buttons;
-+    }
 +
-+    if state.wheel_delta_y != 0 {
-+        // Only forward wheel scroll from a real USB/standard mouse: on Joy-Con 2,
-+        // Nmouse maps the analog stick to wheel_delta_y, which would rapidly spin the hotbar.
-+        let mut type_set: u32 = 0;
-+        let is_std_mouse = unsafe { ffi::hidGetNmouseTypeSet(handle, &mut type_set) } == 0
-+            && (type_set & ffi::HID_NMOUSE_TYPE_STANDARD_MOUSE) != 0;
-+        if is_std_mouse {
++        if state.wheel_delta_y != 0 {
 +            out.push_back(event::WindowEvent::MouseWheel {
 +                device_id,
 +                delta: MouseScrollDelta::LineDelta(0.0, state.wheel_delta_y as f32),

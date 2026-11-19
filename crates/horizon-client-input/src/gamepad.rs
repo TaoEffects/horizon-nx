@@ -442,6 +442,9 @@ pub struct PadSettings {
     /// How the pad drives menus: a focus highlight or a virtual pointer.
     pub menu_nav: MenuNav,
     pub keyboard: TextKeyboard,
+    /// Switch 2 Joy-Con 2 Mouse Mode: Left Joy-Con L/ZL switch hotbar slots,
+    /// Right Joy-Con R/ZR break/place while the optical sensor aims.
+    pub mouse_mode: bool,
     /// Action name -> button, `None` for unbound; missing means the default.
     bindings: BTreeMap<&'static str, Option<Button>>,
 }
@@ -463,6 +466,7 @@ impl Default for PadSettings {
             nintendo_letters: cfg!(target_os = "horizon"),
             menu_nav: MenuNav::Focus,
             keyboard: TextKeyboard::Auto,
+            mouse_mode: false,
             bindings: BTreeMap::new(),
         }
     }
@@ -521,6 +525,7 @@ impl PadSettings {
                 "nintendoLetters" => s.nintendo_letters = flag(s.nintendo_letters),
                 "menuNavigation" => s.menu_nav = MenuNav::parse(value),
                 "keyboard" => s.keyboard = TextKeyboard::parse(value),
+                "mouseMode" => s.mouse_mode = flag(s.mouse_mode),
                 other => {
                     if let Some(action) = other.strip_prefix("bind_") {
                         let button = if value == "none" {
@@ -539,7 +544,7 @@ impl PadSettings {
     }
     pub fn serialize(&self) -> String {
         let mut text = format!(
-            "enabled:{}\nvibration:{}\nadaptiveTriggers:{}\nlightbar:{}\nlookSensitivity:{}\ninvertX:{}\ninvertY:{}\nmoveDeadzone:{}\nlookDeadzone:{}\ntriggerThreshold:{}\ntoggleSneak:{}\nglyphs:{}\nnintendoLetters:{}\nmenuNavigation:{}\nkeyboard:{}\n",
+            "enabled:{}\nvibration:{}\nadaptiveTriggers:{}\nlightbar:{}\nlookSensitivity:{}\ninvertX:{}\ninvertY:{}\nmoveDeadzone:{}\nlookDeadzone:{}\ntriggerThreshold:{}\ntoggleSneak:{}\nglyphs:{}\nnintendoLetters:{}\nmenuNavigation:{}\nkeyboard:{}\nmouseMode:{}\n",
             bool_text(self.enabled),
             bool_text(self.vibration),
             bool_text(self.adaptive_triggers),
@@ -555,6 +560,7 @@ impl PadSettings {
             bool_text(self.nintendo_letters),
             self.menu_nav.name(),
             self.keyboard.name(),
+            bool_text(self.mouse_mode),
         );
         for (action, button) in &self.bindings {
             text.push_str(&format!(

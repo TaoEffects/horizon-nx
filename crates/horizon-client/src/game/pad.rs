@@ -219,10 +219,30 @@ impl Game<'_> {
             }
         } else if button == Button::Start {
             return if down { self.pad_back() } else { Ok(()) };
+        } else if self.settings.controller.mouse_mode {
+            // Switch 2 Joy-Con 2 Mouse Mode:
+            // Left Joy-Con L / ZL switch hotbar slots; Right Joy-Con R / ZR break / place.
+            match button {
+                Button::LeftBumper => return self.pad_action(gamepad::HOTBAR_PREVIOUS, down),
+                Button::LeftTrigger => return self.pad_action(gamepad::HOTBAR_NEXT, down),
+                Button::RightBumper => return self.pad_action("key.attack", down),
+                Button::RightTrigger => return self.pad_action("key.use", down),
+                _ => {}
+            }
         }
         // Releases always reach the mappings, so nothing stays held when a
         // screen opened in between.
-        for action in self.settings.controller.actions_of(button) {
+        let actions = self.settings.controller.actions_of(button);
+        #[cfg(target_os = "horizon")]
+        if playing
+            && down
+            && button == Button::Select
+            && !actions.contains(&gamepad::TOGGLE_DEBUG)
+        {
+            self.debug = !self.debug;
+            return Ok(());
+        }
+        for action in actions {
             self.pad_action(action, down)?;
         }
         Ok(())
@@ -241,7 +261,7 @@ impl Game<'_> {
             }
             gamepad::TOGGLE_DEBUG => {
                 if down && self.screen == Screen::Playing {
-                    self.key_pressed(KeyCode::F3)?;
+                    self.debug = !self.debug;
                 }
                 Ok(())
             }

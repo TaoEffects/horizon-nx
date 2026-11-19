@@ -278,6 +278,7 @@ impl Opt {
             // Horizon's own options: vanilla has no keys for them, so they read
             // the namespace the client bundles (assets/horizon/lang).
             Opt::PadEnabled => "horizon.options.controller",
+            Opt::PadMouseMode => "Joy-Con 2 Mouse Mode",
             Opt::PadVibration => "horizon.options.vibration",
             Opt::PadAdaptiveTriggers => "horizon.options.adaptive_triggers",
             Opt::PadLightbar => "horizon.options.lightbar",
@@ -726,6 +727,7 @@ impl Opt {
             Opt::ForceUnicode => on_off(s.force_unicode),
             Opt::JapaneseGlyphs => on_off(s.japanese_glyphs),
             Opt::PadEnabled => on_off(s.controller.enabled),
+            Opt::PadMouseMode => on_off(s.controller.mouse_mode),
             Opt::PadVibration => on_off(s.controller.vibration),
             Opt::PadAdaptiveTriggers => on_off(s.controller.adaptive_triggers),
             Opt::PadInvertX => on_off(s.controller.invert_x),
@@ -1016,6 +1018,7 @@ impl Opt {
             Opt::ForceUnicode => s.force_unicode = !s.force_unicode,
             Opt::JapaneseGlyphs => s.japanese_glyphs = !s.japanese_glyphs,
             Opt::PadEnabled => s.controller.enabled = !s.controller.enabled,
+            Opt::PadMouseMode => s.controller.mouse_mode = !s.controller.mouse_mode,
             Opt::PadVibration => s.controller.vibration = !s.controller.vibration,
             Opt::PadAdaptiveTriggers => {
                 s.controller.adaptive_triggers = !s.controller.adaptive_triggers
@@ -1919,6 +1922,7 @@ impl OptionsUi {
                 )];
                 rows.extend(pairs(&[
                     Opt::PadEnabled,
+                    Opt::PadMouseMode,
                     Opt::PadVibration,
                     Opt::PadAdaptiveTriggers,
                     Opt::PadLightbar,
