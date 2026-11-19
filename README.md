@@ -1,3 +1,30 @@
+# Horizon — Nintendo Switch 2 Port (kaiHEN / libounce / OunceVK)
+
+> **Native Minecraft: Java Edition 26.3 in Rust/wgpu running on Nintendo Switch 2 at 1080p 120 FPS + VRR.**
+>
+> **Download:** [Latest Switch 2 Release (`horizon-switch2-v0.1.zip`)](https://github.com/TaoEffects/horizon-nx/releases) · **Build guide:** [`switch2/README.md`](switch2/README.md)
+>
+> *Not an official Minecraft product. This repository and its releases contain **zero** Mojang/Minecraft assets, `.jar` files, or game data. You must prepare resources from your own legally owned copy of Minecraft: Java Edition 26.3.*
+
+### Switch 2 Highlights
+- **1080p @ 120 Hz + VRR** (`nwindowSetDimensions(1920, 1080)` + `nwindowSetFrameRates(0, 0, true)` on OunceVK / Switch 2 GPU).
+- **6 Switch 2 application CPU cores** (`InfoType_CoreMask`, 5 chunk generation/meshing workers) and full **~9 GiB** title-override RAM.
+- **Native Switch 2 Audio** (`libounce` `audout`, 48 kHz stereo 16-bit PCM).
+- **Joy-Con 2 & Pro Controller** + **F3 Debug Screen** on **`-` (Minus)** + built-in **FPS / Frame Graph** overlay (*Options → Horizon Settings → Overlay*).
+- **Joy-Con 2 Mouse Mode & USB Mouse** (`libounce` Nmouse): Right Joy-Con mouse (`R` = break/left click, `ZR` = place/right click, `R-Stick` = pick block/middle click) while Left Joy-Con stick stays dedicated to walking.
+- **Touch screen** calibrated to 1080p.
+- **Switch 2 Graphics Presets** (*Performance / Balanced / Quality / Ultra*, render distance up to 32, simulation up to 20).
+- **Shader Packs** (OptiFine/Iris GLSL `.zip` packs & Horizon WGSL packs in `shaderpacks/`) and **Content Mods** (`.hmod` in `mods/`).
+
+### Quick Install (3 steps)
+1. **Download** `horizon-switch2-v0.1.zip` from [Releases](https://github.com/TaoEffects/horizon-nx/releases) and extract it to the root of your Switch 2 SD card (creates `sdmc:/switch/horizon/`).
+2. **Prepare your own Minecraft 26.3 resources** on PC/Mac using the official [Horizon Launcher](https://playhorizon.dev) (with your own legitimate Minecraft Java Edition copy), then copy the contents of `.local/horizon-client/26.3/` into `sdmc:/switch/horizon/resources/` (so `sdmc:/switch/horizon/resources/horizon-resources.json` exists).
+3. **Launch** `horizon.nro` from **hbmenu** using **Title Override** (hold `R` while opening a native Switch 2 title).
+
+Credits: Upstream [Horizon](https://github.com/horizon-rust/horizon) / [JohnUzoka/horizon-nx](https://github.com/JohnUzoka/horizon-nx), [horizon-switch](https://github.com/MakrSas/horizon-switch), `libounce`, and **OunceVK**.
+
+---
+
 <p align="center">
   <img src="docs/media/banner.webp" alt="Horizon: Minecraft: Java Edition 26.3, rewritten in Rust and checked against vanilla by more than 300 differential harnesses" width="100%">
 </p>
